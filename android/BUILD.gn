@@ -1,0 +1,120 @@
+import("//build/config/android/config.gni")
+import("//build/config/android/rules.gni")
+
+
+generate_jni("jni_headers") {
+  sources = [
+    "src/org/test/demo/Test.java",
+  ]
+}
+
+android_library("demo_java") {
+    java_files = [
+        "src/org/test/demo/Test.java",
+    ]
+
+    annotation_processor_deps = [ 
+        "//base/android/jni_generator:jni_processor",
+    ]
+    deps = [ 
+        "//base:jni_java",
+        "//base:base_java",
+    ]
+}
+
+shared_library("libdemo") {
+    sources = [
+        "demo_library_loader.cc",
+        "test.h",
+        "test.cc",
+    ]
+
+    deps = [
+        "//base",
+        ":jni_headers",
+    ]
+    configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
+    configs += [ "//build/config/android:hide_all_but_jni" ]
+}
+
+#需要生成依赖的so导出的函数头文件
+_jni_registration_header = "$target_gen_dir/demo_jni_registration.h"
+
+generate_jni_registration("demo_jni_registration") {
+  target = ":demo_java"
+  header_output = _jni_registration_header
+
+  #不使用base库的导入，需要使用system.loadlibrary函数来加载so
+  sources_blacklist = [
+    "//base/android/java/src/org/chromium/base/library_loader/LibraryLoader.java",
+    "//base/android/java/src/org/chromium/base/library_loader/LibraryPrefetcher.java",
+    "//base/android/java/src/org/chromium/base/process_launcher/ChildProcessService.java",
+    "//base/android/java/src/org/chromium/base/SysUtils.java",
+  ]
+}
+
+#生成N.java
+android_library("demo_jni_registration_java") {
+  srcjar_deps = [ ":demo_jni_registration" ]
+}
+
+template("repackage_jars") {
+  dist_jar(target_name) {
+    requires_android = true
+    direct_deps_only = true
+    use_unprocessed_jars = true
+    no_build_hooks = true
+    forward_variables_from(invoker, "*")
+  }
+}
+
+android_java_prebuilt("demo_repackage_native_java") {
+  jar_path = "$root_out_dir/demo.jar"
+  enable_bytecode_rewriter = false
+  deps = [
+    ":demo_jar",
+  ]
+}
+
+
+repackage_jars("demo_jar") {
+    output = "$root_out_dir/demo.jar"
+    deps = [
+        ":demo_java",
+        "//base:base_java",
+        "//base:jni_java",
+    ]
+    jar_excluded_patterns = [
+        "android/*",
+        "*/library_loader/*.class",
+        "*/multidex/*.class",
+        "*/process_launcher/*.class",
+        "*/SysUtils*.class",
+        "*/CachedMetrics*.class",
+        "org/chromium/base/memory/MemoryPressureMonitor*.class",
+    ]
+}
+
+repackage_jars("demo_final_jar") {
+  output = "$root_out_dir/demo_final.jar"
+  deps = [
+    ":demo_jni_registration_java",
+    ":demo_repackage_native_java",
+  ]
+    jar_excluded_patterns = [
+        "android/*",
+        "*/library_loader/*.class",
+        "*/multidex/*.class",
+        "*/process_launcher/*.class",
+        "*/SysUtils*.class",
+        "*/CachedMetrics*.class",
+        "org/chromium/base/memory/MemoryPressureMonitor*.class",
+    ]
+}
+
+group("demo_android") {
+    deps = [
+        ":libdemo",
+        ":demo_final_jar",
+    ]
+}
